@@ -9,6 +9,6 @@
 			<attribute name="module" value="true"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="C:/Users/terje/dev/tomcat/lib/servlet-api.jar"/>
+	<classpathentry kind="lib" path="C:/Users/terje/dev/apache-tomcat-8.5.66/lib/servlet-api.jar"/>
 	<classpathentry kind="output" path="build/classes"/>
 </classpath>

@@ -41,7 +41,7 @@ public class SynkServ extends HttpServlet {
 
 	//Configures max rows that will be returned. Should be the same number in the clients. 
 	private static final int MAX_ROWS_TO_RETURN = 10;
-
+	private static final String VER = "44";
 	private static final long serialVersionUID = 1L;
 	public static final Object TRANS_ACK = "TRANSACK";
 	//private ExecutorService executor;
@@ -57,7 +57,7 @@ public class SynkServ extends HttpServlet {
 
 	public void init(){
 
-		System.out.println("in init...version 42");
+		System.out.println("in init...version "+VER);
 		try {
 			Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
 		} catch (ClassNotFoundException e) {
@@ -202,17 +202,14 @@ public class SynkServ extends HttpServlet {
 
 		
 		Timestamp 			currTime 		= new java.sql.Timestamp(System.currentTimeMillis());
-
-		System.out.println(currTime+": In dopost  ");
-
-
 		ObjectOutputStream 	out=null;
 		ObjectInputStream  	in=null;
+		String errLog=null, errDetails = null;
 
 		try {
 
 				connectDatabase();
-				String errLog=null;
+				
 				if (con==null) {
 					writeLog("no connection to database");
 					return;
@@ -221,76 +218,83 @@ public class SynkServ extends HttpServlet {
 				final String GROUP = (String)in.readObject();
 				final String USER = (String)in.readObject();		
 				final String USERUUID = (String)in.readObject();
-				final String APP = (String)in.readObject();			
-				try {				
-					System.out.println("team: "+GROUP+" user: "+USER+" UUID: "+USERUUID+" APP: "+APP);
-					//insert
-					
-					Object DATA = in.readObject();
-					if (!(DATA instanceof EndOfStream))
-						errLog = insertData(DATA,
-								GROUP,
-								APP,
-								USER,
-								USERUUID, 
-								currTime);
-								
-					//transmit
-					
-					//Fetch start timestamp.
-					Long   startTime = (Long)in.readObject();
-					out	= new ObjectOutputStream(response.getOutputStream());
-					errLog = sendData(startTime,
-								MAX_ROWS_TO_RETURN, 
-								out, 
-								GROUP, 
-								APP, 
-								USER, 
-								USERUUID, 
-								currTime);
-					
-					if (errLog != null) {
-						writeLog(errLog, USER,USERUUID);
-						out.writeObject(new SyncFailed(errLog));
-					}
-				} catch (Exception e) {
-					e.printStackTrace();
-					writeLog("team: "+GROUP+" user: "+USER+" UUID: "+USERUUID+" APP: "+APP);
-				}	
+				final String APP = (String)in.readObject();	
+				errDetails = "team: "+GROUP+" user: "+USER+" UUID: "+USERUUID+" APP: "+APP;
+				
+				//insert
+				
+				Object DATA = in.readObject();
+				if (!(DATA instanceof EndOfStream))
+					errLog = insertData(DATA,
+							GROUP,
+							APP,
+							USER,
+							USERUUID, 
+							currTime);
+							
+				//transmit
+				
+				//Fetch start timestamp.
+				Long   startTime = (Long)in.readObject();
+				out	= new ObjectOutputStream(response.getOutputStream());
+				errLog = sendData(startTime,
+							MAX_ROWS_TO_RETURN, 
+							out, 
+							GROUP, 
+							APP, 
+							USER, 
+							USERUUID, 
+							currTime);
+				
 
-		} catch (Exception e) {
+		} catch (SQLException e) {
+			errLog = "SQL EXCEPTION";		
 			e.printStackTrace();
-			writeLog(e.getMessage());		
-		}
+		} catch (IOException e) {
+			errLog = "IO EXCEPTION in write";
+			e.printStackTrace();
+		} catch (ClassNotFoundException e) {
+			errLog = "ClassNotFound Exception in ReadObject";
+			e.printStackTrace();
+		} finally {
+			try {
+				if (in!=null)
+					in.close();
+				if (out !=null)
+					out.close();
+				if (con != null)
+					con.close();
+			} catch (Exception e) {
+				writeLog(e.getMessage());
+			}
+		} 
 		
-		if (in!=null)
-			in.close();
-		if (out !=null)
-			out.close();
+			
+		if (errLog != null) {
+			if (errDetails != null)
+				writeLog(errDetails);
+			writeLog(errLog);
+			out.writeObject(new SyncFailed(errLog));
+		}
 		
 	}
 
 
-	private String insertData(Object DATA, String GROUP, String APP, String USER, String USERUUID, Timestamp currTime) {
+	private String insertData(Object DATA, String GROUP, String APP, String USER, String USERUUID, Timestamp currTime) throws SQLException {
 
-		try {
-			PreparedStatement statement = con.prepareStatement("INSERT INTO audit (SYNCGROUP, [USER], USERUUID, APP, TIMEOFINSERT, SYNCOBJECTS) VALUES (?,?,?,?,?,?)");
-			statement.setString(1, GROUP);
-			statement.setString(2, USER);
-			statement.setString(3, USERUUID);
-			statement.setString(4, APP);
-			statement.setTimestamp(5, currTime);
-			byte[] bytes = objToByte(DATA);
-			if (bytes==null) {
-				return "Couldn't create byte array of object";
-			}
-			Blob blob = new javax.sql.rowset.serial.SerialBlob(bytes);
-			statement.setBlob(6, blob);
-			statement.execute();
-		} catch (SQLException e) {
-			return ("SQL Exception in insertData");
+		PreparedStatement statement = con.prepareStatement("INSERT INTO audit (SYNCGROUP, [USER], USERUUID, APP, TIMEOFINSERT, SYNCOBJECTS) VALUES (?,?,?,?,?,?)");
+		statement.setString(1, GROUP);
+		statement.setString(2, USER);
+		statement.setString(3, USERUUID);
+		statement.setString(4, APP);
+		statement.setTimestamp(5, currTime);
+		byte[] bytes = objToByte(DATA);
+		if (bytes==null) {
+			return "Couldn't create byte array of object";
 		}
-		System.out.println("insert into project table");
+		Blob blob = new javax.sql.rowset.serial.SerialBlob(bytes);
+		statement.setBlob(6, blob);
+		statement.execute();
 		return null;
 	}
 
@@ -298,81 +302,71 @@ public class SynkServ extends HttpServlet {
 
 	//send data requested
 	//return error message if any
-	private String sendData(long startTime,  int rowsToReturn, ObjectOutputStream out, String GROUP, String APP, String USER, String USERUUID, Timestamp currTime) {
+	private String sendData(long startTime,  int rowsToReturn, ObjectOutputStream out, String GROUP, String APP, String USER, String USERUUID, Timestamp currTime) throws SQLException, IOException {
 
-		String errLog=null;
+		String errLog = null;
+		//check if any objects are available for this client.
+		//Number of rows with max 1000 sync objects that will be returned.  
+		//Statement stmt = con.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE,MAX_ROWS_TO_RETURN);
+		Statement stmt = con.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE,ResultSet.CONCUR_READ_ONLY);
+		//ResultSet res = stmt.executeQuery("select TIMEOFINSERT, SYNCOBJECTS FROM audit WHERE"
+		//			+" SYNCGROUP = '"+GROUP
+		Timestamp timeForLastEntryRead = new Timestamp(startTime);
+		ResultSet res = stmt.executeQuery("select TOP "+rowsToReturn
+				+" TIMEOFINSERT, SYNCOBJECTS FROM audit WHERE"
+				+" SYNCGROUP = '"+GROUP
+				+"' AND APP = '"+APP
+				+"' AND USERUUID <> '"+USERUUID
+				+"' AND TIMEOFINSERT > '"+timeForLastEntryRead+"'"
+				);
+		//							+"' LIMIT "+MAX_ROWS_TO_RETURN);
+		//Send size back to caller as ACK.
+		res.last();
+		int totalRows = res.getRow();
+		res.beforeFirst();
+		
+		out.writeObject(totalRows+"");
+		Blob blob;
+		Timestamp time=null,maxTime= null;
+		byte[] bytes;
 
-		try {
-			//check if any objects are available for this client.
-			//Number of rows with max 1000 sync objects that will be returned.  
-			//Statement stmt = con.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE,MAX_ROWS_TO_RETURN);
-			Statement stmt = con.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE,ResultSet.CONCUR_READ_ONLY);
-			//ResultSet res = stmt.executeQuery("select TIMEOFINSERT, SYNCOBJECTS FROM audit WHERE"
-			//			+" SYNCGROUP = '"+GROUP
-			Timestamp timeForLastEntryRead = new Timestamp(startTime);
-			ResultSet res = stmt.executeQuery("select TOP "+rowsToReturn
-					+" TIMEOFINSERT, SYNCOBJECTS FROM audit WHERE"
-					+" SYNCGROUP = '"+GROUP
-					+"' AND APP = '"+APP
-					+"' AND USERUUID <> '"+USERUUID
-					+"' AND TIMEOFINSERT > '"+timeForLastEntryRead+"'"
-					);
-			//							+"' LIMIT "+MAX_ROWS_TO_RETURN);
-			//Send size back to caller as ACK.
-			res.last();
-			int totalRows = res.getRow();
-			res.beforeFirst();
-			System.out.println("Rows to send: "+totalRows);
-			out.writeObject(totalRows+"");
-			Blob blob;
-			Timestamp time=null,maxTime= null;
-			byte[] bytes;
+		while (res.next()) {
 
-			while (res.next()) {
+			time = res.getTimestamp(1);
 
-				time = res.getTimestamp(1);
+			blob = res.getBlob(2);
+			//System.out.println("EXTRACTING "+i +"with timestamp "+time);
+			bytes = blob.getBytes(1,(int)blob.length());
+			if (bytes!=null) {
+				//Write BLOB!!
+				out.writeObject(bytes);
 
-				blob = res.getBlob(2);
-				//System.out.println("EXTRACTING "+i +"with timestamp "+time);
-				bytes = blob.getBytes(1,(int)blob.length());
-				if (bytes!=null) {
-					//Write BLOB!!
-					out.writeObject(bytes);
-
-					if (maxTime == null || time.after(maxTime)) {
-						//System.out.println("updated maxTime to "+time);
-						maxTime = time;
-					}
-				} else {
-					errLog = "Could not turn blob into byte array";
+				if (maxTime == null || time.after(maxTime)) {
+					//System.out.println("updated maxTime to "+time);
+					maxTime = time;
 				}
+			} else {
+				errLog = "Could not turn blob into byte array. User: "+USER;
 			}
-			//End with new TIME_FOR_LAST_ENTRY_THIS_USER_HAS_CHECKED
-			//If no max, use current time.
-			if (maxTime == null)
-				maxTime = currTime;
-			out.writeObject(Long.valueOf(maxTime.getTime()));
-			//System.out.println("Flushing!!!");
-			out.flush();
-
-			//update call entry.
-			PreparedStatement statement = con.prepareStatement("INSERT INTO callentries (SYNCGROUP, CALLER, USERUUID, APP, TIMEOFCALL) VALUES (?,?,?,?,?)");
-			statement.setString(1,GROUP);
-			statement.setString(2,USER);
-			statement.setString(3,USERUUID);					
-			statement.setString(4,APP);
-			statement.setTimestamp(5, currTime);
-			statement.execute();
-			//We are done. selebrate with end of stream object.
-			con.close();
-		} catch (SQLException e) {
-			errLog = "SQL EXCEPTION during write";
-			e.printStackTrace();
-		} catch (IOException e) {
-			errLog = "IO EXCEPTION in write";
-			e.printStackTrace();
 		}
+		//End with new TIME_FOR_LAST_ENTRY_THIS_USER_HAS_CHECKED
+		//If no max, use current time.
+		if (maxTime == null)
+			maxTime = currTime;
+		out.writeObject(Long.valueOf(maxTime.getTime()));
+		//System.out.println("Flushing!!!");
+		out.flush();
+		//update call entry.
+		PreparedStatement statement = con.prepareStatement("INSERT INTO callentries (SYNCGROUP, CALLER, USERUUID, APP, TIMEOFCALL) VALUES (?,?,?,?,?)");
+		statement.setString(1,GROUP);
+		statement.setString(2,USER);
+		statement.setString(3,USERUUID);					
+		statement.setString(4,APP);
+		statement.setTimestamp(5, currTime);
+		statement.execute();
+		//We are done. selebrate with end of stream object.		
 		return errLog;
+		
 	}
 
 
