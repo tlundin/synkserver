@@ -41,7 +41,7 @@ public class SynkServ extends HttpServlet {
 
 	//Configures max rows that will be returned. Should be the same number in the clients. 
 	private static final int MAX_ROWS_TO_RETURN = 10;
-	private static final String VER = "44";
+	private static final String VER = "45";
 	private static final long serialVersionUID = 1L;
 	public static final Object TRANS_ACK = "TRANSACK";
 	//private ExecutorService executor;
@@ -170,22 +170,19 @@ public class SynkServ extends HttpServlet {
 		try {
 			///Class.forName("org.postgresql.Driver");
 			Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
-			//String dbName = System.getProperty("RDS_DB_NAME");
-			//String userName = System.getProperty("RDS_USERNAME");
-			//String password = System.getProperty("RDS_PASSWORD");
-			String userName = "kalle";
-			String password = "AbraKadabra!1";
-			//Hardcode DB name for now to avoid having to replace beanstalk env. dns.
-			String hostname = "ebdb.cljwr0n66av2.eu-west-1.rds.amazonaws.com"; //System.getProperty("RDS_HOSTNAME");
-			//String goofer = System.getProperty("Goofer");
-			String port = "1433";
-			//String jdbcUrl ="jdbc:sqlserver://ultdbv2-5.slu.se;instanceName=ultinst5;databaseName=Rlo_prod;user=fieldappklient;password=z5_A*9Iu2";
-			String jdbcUrl = "jdbc:sqlserver://" + hostname + ":" + port + ";databaseName=Rlo_prod;user=" + userName + ";password=" + password;
-			//				logger.severe("connection to database with "+jdbcUrl);
+			
+			String userName = System.getProperty("RDS_USERNAME");
+			String password = System.getProperty("RDS_PASSWORD");
+			String hostName = System.getProperty("RDS_HOSTNAME");
+			if (userName == null || "".equals(userName) || password == null || 
+					"".equals(password) || hostName == null || "".equals(hostName))
+				System.out.println("CON ERROR - missing USER HOST PWD ");
+			String port = System.getProperty("RDS_PORT");
+			String jdbcUrl = "jdbc:sqlserver://" + hostName + ":" + port + ";databaseName=Rlo_prod;user=" + userName + ";password=" + password;
 			con = DriverManager.getConnection(jdbcUrl);
-			//				logger.warning("Remote connection successful.");
-			//System.out.println("username password hostname port goofer: "+userName+" "+password+" "+hostname+" "+port+" "+goofer);
-			//System.out.println("Connection is null? "+con==null);
+			
+			
+			
 		}
 		catch (ClassNotFoundException e) { logger.warning(e.toString());}
 		catch (SQLException e) { logger.warning(e.toString());}
